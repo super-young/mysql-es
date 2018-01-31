@@ -19,11 +19,19 @@ import com.alibaba.otter.canal.protocol.CanalEntry.EntryType;
 import com.alibaba.otter.canal.protocol.CanalEntry.EventType;
 import com.alibaba.otter.canal.protocol.CanalEntry.RowChange;
 import com.alibaba.otter.canal.protocol.CanalEntry.RowData;
+import com.sun.xml.internal.ws.policy.privateutil.PolicyUtils;
 import org.apache.http.HttpHost;
+import org.elasticsearch.action.DocWriteRequest;
+import org.elasticsearch.action.DocWriteResponse;
 import org.elasticsearch.action.admin.indices.create.CreateIndexRequest;
 import org.elasticsearch.action.admin.indices.create.CreateIndexResponse;
+import org.elasticsearch.action.bulk.BulkItemResponse;
+import org.elasticsearch.action.bulk.BulkRequest;
+import org.elasticsearch.action.bulk.BulkResponse;
+import org.elasticsearch.action.delete.DeleteResponse;
 import org.elasticsearch.action.index.IndexRequest;
 import org.elasticsearch.action.index.IndexResponse;
+import org.elasticsearch.action.update.UpdateResponse;
 import org.elasticsearch.client.RestClient;
 import org.elasticsearch.client.RestHighLevelClient;
 import org.elasticsearch.common.xcontent.XContent;
@@ -36,7 +44,7 @@ import org.elasticsearch.common.xcontent.XContentType;
 public class App {
     // JDBC 驱动名及数据库 URL
     static final String JDBC_DRIVER = "com.mysql.cj.jdbc.Driver";
-    static final String DB_URL = "jdbc:mysql://localhost:3306/fg_dev";
+    static final String DB_URL = "jdbc:mysql://localhost:3306/fg_dev?useSSL=false";
 
     // 数据库的用户名与密码，需要根据自己的设置
     static final String USER = "root";
@@ -123,43 +131,104 @@ public class App {
     public static void  main(String args[])
     {
         try {
-            ResultSet rs = findGoods();
-            while (rs.next()){
-                String name = rs.getString("goods_name");
-                String keywords = rs.getString("keywords");
-                String catName = rs.getString("cat_name");
-                System.out.println(name);
-                System.out.println(keywords);
-                System.out.println(catName);
-            }
+            List<Goods> goodsList = findGoods();
+            Integer numOfCreated = batchInsertToES(goodsList);
+            System.out.println(numOfCreated);
         } catch (Exception e) {
             e.printStackTrace();
         }
     }
 
-    private static ResultSet findGoods()throws Exception
+    private static List<Goods> findGoods()throws Exception
     {
         Connection conn = null;
         Statement stmt = null;
         // 注册 JDBC 驱动
-        Class.forName("com.mysql.jdbc.Driver");
+        Class.forName(JDBC_DRIVER);
 
         // 打开链接
-        System.out.println("连接数据库...");
         conn = DriverManager.getConnection(DB_URL,USER,PASS);
 
         // 执行查询
-        System.out.println(" 实例化Statement对...");
         stmt = conn.createStatement();
         String sql;
-        sql = "SELECT g*,c.cat_name,b.brand_name FROM dsc_goods as g,dsc_category,dsc_brand as b as c WHERE g.cat_id=c.cat_id And g.brand_id=b.brand_id LIMIT 10,10";
+        sql = "SELECT g.*,c.cat_name,b.brand_name FROM dsc_goods as g,dsc_category as c,dsc_brand as b WHERE g.cat_id=c.cat_id And g.brand_id=b.brand_id";
         ResultSet rs = stmt.executeQuery(sql);
-
+        List<Goods> list = new ArrayList<Goods>();
+        while (rs.next()){
+            String name = rs.getString("goods_name");
+            String desc = rs.getString("goods_desc");
+            String catName = rs.getString("cat_name");
+            String brandName = rs.getString("brand_name");
+            Double price = rs.getDouble("shop_price");
+            Integer id = rs.getInt("goods_id");
+            Goods goods = new Goods();
+            goods.setBrandName(brandName);
+            goods.setCatName(catName);
+            goods.setName(name);
+            goods.setPrice(price);
+            goods.setDesc(desc);
+            goods.setId(id);
+            list.add(goods);
+        }
         // 完成后关闭
         rs.close();
         stmt.close();
         conn.close();
-        return rs;
+        return list;
+    }
+
+    private static int batchInsertToES(List<Goods> list) throws Exception
+    {
+        int batchSize = 100;
+        RestHighLevelClient client = new RestHighLevelClient(
+                RestClient.builder(
+                        new HttpHost("localhost", 9200, "http")));
+
+        BulkRequest request = new BulkRequest();
+
+        for(Goods goods: list) {
+            Map<String,Object> property = new HashMap<String,Object>();
+            property.put("name",goods.getName());
+            property.put("brand",goods.getBrandName());
+            property.put("category",goods.getCatName());
+            property.put("desc",goods.getDesc());
+            property.put("price",goods.getPrice());
+            property.put("id",goods.getId());
+
+            request.add(new IndexRequest("goods", "test", null)
+                    .source(property));
+        }
+        request.timeout("10m");
+
+        BulkResponse bulkResponse = client.bulk(request);
+        Map<String,Integer> results = new HashMap<String, Integer>(3);
+        results.put("update",0);
+        results.put("delete",0);
+        results.put("created",0);
+        for (BulkItemResponse bulkItemResponse : bulkResponse) {
+            DocWriteResponse itemResponse = bulkItemResponse.getResponse();
+
+            if (bulkItemResponse.isFailed()) {
+                BulkItemResponse.Failure failure = bulkItemResponse.getFailure();
+                System.out.println("one Document failed");
+                System.out.println(failure.getMessage());
+            }
+
+            if (bulkItemResponse.getOpType() == DocWriteRequest.OpType.INDEX) {
+                IndexResponse indexResponse = (IndexResponse) itemResponse;
+                results.put("created",results.get("created")+1);
+                System.out.println("added one document");
+            } else if (bulkItemResponse.getOpType() == DocWriteRequest.OpType.UPDATE) {
+                UpdateResponse updateResponse = (UpdateResponse) itemResponse;
+                results.put("update",results.get("update")+1);
+
+            } else if (bulkItemResponse.getOpType() == DocWriteRequest.OpType.DELETE) {
+                DeleteResponse deleteResponse = (DeleteResponse) itemResponse;
+                results.put("delete",results.get("delete")+1);
+            }
+        }
+        return results.get("created");
     }
 
     private static void testes()
