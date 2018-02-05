@@ -7,8 +7,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-
-import com.alibaba.fastjson.JSON;
 import com.alibaba.otter.canal.client.CanalConnector;
 import com.alibaba.otter.canal.client.CanalConnectors;
 import com.alibaba.otter.canal.common.utils.AddressUtils;
@@ -19,12 +17,10 @@ import com.alibaba.otter.canal.protocol.CanalEntry.EntryType;
 import com.alibaba.otter.canal.protocol.CanalEntry.EventType;
 import com.alibaba.otter.canal.protocol.CanalEntry.RowChange;
 import com.alibaba.otter.canal.protocol.CanalEntry.RowData;
-import com.sun.xml.internal.ws.policy.privateutil.PolicyUtils;
+
 import org.apache.http.HttpHost;
 import org.elasticsearch.action.DocWriteRequest;
 import org.elasticsearch.action.DocWriteResponse;
-import org.elasticsearch.action.admin.indices.create.CreateIndexRequest;
-import org.elasticsearch.action.admin.indices.create.CreateIndexResponse;
 import org.elasticsearch.action.bulk.BulkItemResponse;
 import org.elasticsearch.action.bulk.BulkRequest;
 import org.elasticsearch.action.bulk.BulkResponse;
@@ -34,8 +30,7 @@ import org.elasticsearch.action.index.IndexResponse;
 import org.elasticsearch.action.update.UpdateResponse;
 import org.elasticsearch.client.RestClient;
 import org.elasticsearch.client.RestHighLevelClient;
-import org.elasticsearch.common.xcontent.XContent;
-import org.elasticsearch.common.xcontent.XContentType;
+
 
 /**
  * Hello world!
@@ -49,7 +44,7 @@ public class App {
     // 数据库的用户名与密码，需要根据自己的设置
     static final String USER = "root";
     static final String PASS = "123456";
-    public static void main1(String args[]) {
+    public static void main(String args[]) {
         // 创建链接
         CanalConnector connector = CanalConnectors.newSingleConnector(new InetSocketAddress(AddressUtils.getHostIp(),
                 11111), "example", "", "");
@@ -77,7 +72,7 @@ public class App {
                     printEntry(message.getEntries());
                 }
 
-                connector.ack(batchId); // 提交确认
+//                connector.ack(batchId); // 提交确认
                 // connector.rollback(batchId); // 处理失败, 回滚数据
             }
 
@@ -122,13 +117,37 @@ public class App {
         }
     }
 
+    private static Map<String,Object> cloumnsAllToMap(List<Column> cols)
+    {
+        Map<String,Object> map = new HashMap<String, Object>();
+        for(Column col :cols){
+            map.put(col.getName(),col.getValue());
+        }
+        return map;
+    }
+
+    private static Map<String,Object> cloumnsUpdatedToMap(List<Column> cols)
+    {
+        Map<String,Object> map = new HashMap<String, Object>();
+        for(Column col :cols){
+            if(col.hasUpdated())
+                map.put(col.getName(),col.getValue());
+        }
+        return map;
+    }
+
+    private static void deleteRowInES(Integer id)
+    {
+
+    }
+
     private static void printColumn(List<Column> columns) {
         for (Column column : columns) {
             System.out.println(column.getName() + " : " + column.getValue() + "    update=" + column.getUpdated());
         }
     }
 
-    public static void  main(String args[])
+    public static void  main1(String args[])
     {
         try {
             List<Goods> goodsList = findGoods();
@@ -182,53 +201,59 @@ public class App {
     {
         int batchSize = 100;
         RestHighLevelClient client = new RestHighLevelClient(
-                RestClient.builder(
-                        new HttpHost("localhost", 9200, "http")));
+                    RestClient.builder(new HttpHost("localhost", 9200, "http")));
+        try {
+            BulkRequest request = new BulkRequest();
 
-        BulkRequest request = new BulkRequest();
+            for (Goods goods : list) {
+                Map<String, Object> property = new HashMap<String, Object>();
+                property.put("name", goods.getName());
+                property.put("brand", goods.getBrandName());
+                property.put("category", goods.getCatName());
+                property.put("desc", goods.getDesc());
+                property.put("price", goods.getPrice());
+                property.put("id", goods.getId());
 
-        for(Goods goods: list) {
-            Map<String,Object> property = new HashMap<String,Object>();
-            property.put("name",goods.getName());
-            property.put("brand",goods.getBrandName());
-            property.put("category",goods.getCatName());
-            property.put("desc",goods.getDesc());
-            property.put("price",goods.getPrice());
-            property.put("id",goods.getId());
-
-            request.add(new IndexRequest("goods", "test", null)
-                    .source(property));
-        }
-        request.timeout("10m");
-
-        BulkResponse bulkResponse = client.bulk(request);
-        Map<String,Integer> results = new HashMap<String, Integer>(3);
-        results.put("update",0);
-        results.put("delete",0);
-        results.put("created",0);
-        for (BulkItemResponse bulkItemResponse : bulkResponse) {
-            DocWriteResponse itemResponse = bulkItemResponse.getResponse();
-
-            if (bulkItemResponse.isFailed()) {
-                BulkItemResponse.Failure failure = bulkItemResponse.getFailure();
-                System.out.println("one Document failed");
-                System.out.println(failure.getMessage());
+                request.add(new IndexRequest("goods", "test", null)
+                        .source(property));
             }
+            request.timeout("2m");
 
-            if (bulkItemResponse.getOpType() == DocWriteRequest.OpType.INDEX) {
-                IndexResponse indexResponse = (IndexResponse) itemResponse;
-                results.put("created",results.get("created")+1);
-                System.out.println("added one document");
-            } else if (bulkItemResponse.getOpType() == DocWriteRequest.OpType.UPDATE) {
-                UpdateResponse updateResponse = (UpdateResponse) itemResponse;
-                results.put("update",results.get("update")+1);
+            BulkResponse bulkResponse = client.bulk(request);
+            Map<String, Integer> results = new HashMap<String, Integer>(3);
+            results.put("update", 0);
+            results.put("delete", 0);
+            results.put("created", 0);
+            for (BulkItemResponse bulkItemResponse : bulkResponse) {
+                DocWriteResponse itemResponse = bulkItemResponse.getResponse();
 
-            } else if (bulkItemResponse.getOpType() == DocWriteRequest.OpType.DELETE) {
-                DeleteResponse deleteResponse = (DeleteResponse) itemResponse;
-                results.put("delete",results.get("delete")+1);
+                if (bulkItemResponse.isFailed()) {
+                    BulkItemResponse.Failure failure = bulkItemResponse.getFailure();
+                    System.out.println("one Document failed");
+                    System.out.println(failure.getMessage());
+                }
+
+                if (bulkItemResponse.getOpType() == DocWriteRequest.OpType.INDEX) {
+                    IndexResponse indexResponse = (IndexResponse) itemResponse;
+                    results.put("created", results.get("created") + 1);
+                    System.out.println("added one document");
+                } else if (bulkItemResponse.getOpType() == DocWriteRequest.OpType.UPDATE) {
+                    UpdateResponse updateResponse = (UpdateResponse) itemResponse;
+                    results.put("update", results.get("update") + 1);
+
+                } else if (bulkItemResponse.getOpType() == DocWriteRequest.OpType.DELETE) {
+                    DeleteResponse deleteResponse = (DeleteResponse) itemResponse;
+                    results.put("delete", results.get("delete") + 1);
+                }
+                return results.get("created");
             }
+        }catch (Exception e){
+
+        }finally {
+            client.close();
+
         }
-        return results.get("created");
+        return 0;
     }
 
     private static void testes()
@@ -245,7 +270,6 @@ public class App {
         list.add("coding");
         list.add("pingpangball");
         property.put("hobbies",list);
-//        Map<String,Object> mapping = new HashMap<String,Object>();
         IndexRequest request = new IndexRequest("test_idx","test",null);
         request.source(property);
         try {
