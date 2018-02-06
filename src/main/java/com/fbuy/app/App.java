@@ -1,11 +1,11 @@
 package com.fbuy.app;
 
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.sql.*;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 import com.alibaba.otter.canal.client.CanalConnector;
 import com.alibaba.otter.canal.client.CanalConnectors;
@@ -24,9 +24,11 @@ import org.elasticsearch.action.DocWriteResponse;
 import org.elasticsearch.action.bulk.BulkItemResponse;
 import org.elasticsearch.action.bulk.BulkRequest;
 import org.elasticsearch.action.bulk.BulkResponse;
+import org.elasticsearch.action.delete.DeleteRequest;
 import org.elasticsearch.action.delete.DeleteResponse;
 import org.elasticsearch.action.index.IndexRequest;
 import org.elasticsearch.action.index.IndexResponse;
+import org.elasticsearch.action.update.UpdateRequest;
 import org.elasticsearch.action.update.UpdateResponse;
 import org.elasticsearch.client.RestClient;
 import org.elasticsearch.client.RestHighLevelClient;
@@ -44,7 +46,17 @@ public class App {
     // 数据库的用户名与密码，需要根据自己的设置
     static final String USER = "root";
     static final String PASS = "123456";
+    static final String SchemaName = "fg_dev";
+    static Set<String> tables=null;
+    private static RestHighLevelClient client=null;
     public static void main(String args[]) {
+        init();
+        initES();
+        if(args.length>1){
+            dumpGoodsToES();
+            System.exit(0);
+        }
+
         // 创建链接
         CanalConnector connector = CanalConnectors.newSingleConnector(new InetSocketAddress(AddressUtils.getHostIp(),
                 11111), "example", "", "");
@@ -54,7 +66,7 @@ public class App {
             connector.connect();
             connector.subscribe(".*\\..*");
             connector.rollback();
-            int totalEmptyCount = 120;
+            int totalEmptyCount = 1200;
             while (emptyCount < totalEmptyCount) {
                 Message message = connector.getWithoutAck(batchSize); // 获取指定数量的数据
                 long batchId = message.getId();
@@ -63,13 +75,17 @@ public class App {
                     emptyCount++;
                     System.out.println("empty count : " + emptyCount);
                     try {
-                        Thread.sleep(1000);
+                        Thread.sleep(2000);
                     } catch (InterruptedException e) {
                     }
                 } else {
                     emptyCount = 0;
                     // System.out.printf("message[batchId=%s,size=%s] \n", batchId, size);
-                    printEntry(message.getEntries());
+                    try{
+                        printEntry(message.getEntries());
+                    }catch (Exception e){
+
+                    }
                 }
 
 //                connector.ack(batchId); // 提交确认
@@ -82,11 +98,35 @@ public class App {
         }
     }
 
-    private static void printEntry(List<Entry> entrys) {
+    public static void init()
+    {
+        try {
+            FileInputStream reader = new FileInputStream("config.ini");
+            Properties pros = new Properties();
+            pros.load(reader);
+            String schema = pros.getProperty("database");
+            String tablesStr = pros.getProperty("tables");
+            String[] arr = tablesStr.split(",");
+            tables = new HashSet<String>(Arrays.asList(arr));
+        } catch (FileNotFoundException e) {
+            e.printStackTrace();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private static void printEntry(List<Entry> entrys) throws IOException {
+
         for (Entry entry : entrys) {
             if (entry.getEntryType() == EntryType.TRANSACTIONBEGIN || entry.getEntryType() == EntryType.TRANSACTIONEND) {
                 continue;
             }
+
+            if(!entry.getHeader().getSchemaName().equals(SchemaName) || !tables.contains(entry.getHeader().getTableName())){
+                continue;
+            }
+
+
 
             RowChange rowChage = null;
             try {
@@ -104,20 +144,24 @@ public class App {
 
             for (RowData rowData : rowChage.getRowDatasList()) {
                 if (eventType == EventType.DELETE) {
-                    printColumn(rowData.getBeforeColumnsList());
+                    Map<String,Object> all = columnsAllToMap(rowData.getBeforeColumnsList());
+                    String id = (String) all.get("goods_id");
+                    deleteRowInES("goods","test",id);
                 } else if (eventType == EventType.INSERT) {
-                    printColumn(rowData.getAfterColumnsList());
+                    Map<String,Object> all = columnsAllToMap(rowData.getAfterColumnsList());
+                    String id = (String) all.get("goods_id");
+                    addRowToES("goods","test",id,all);
                 } else {
-                    System.out.println("------->; before");
-                    printColumn(rowData.getBeforeColumnsList());
-                    System.out.println("------->; after");
-                    printColumn(rowData.getAfterColumnsList());
+                    Map<String,Object> all = columnsAllToMap(rowData.getAfterColumnsList());
+                    Map<String,Object> updated = columnsUpdatedToMap(rowData.getAfterColumnsList());
+                    String id = (String) all.get("goods_id");
+                    updateRowInES("goods","type",id,updated);
                 }
             }
         }
     }
 
-    private static Map<String,Object> cloumnsAllToMap(List<Column> cols)
+    private static Map<String,Object> columnsAllToMap(List<Column> cols)
     {
         Map<String,Object> map = new HashMap<String, Object>();
         for(Column col :cols){
@@ -126,7 +170,7 @@ public class App {
         return map;
     }
 
-    private static Map<String,Object> cloumnsUpdatedToMap(List<Column> cols)
+    private static Map<String,Object> columnsUpdatedToMap(List<Column> cols)
     {
         Map<String,Object> map = new HashMap<String, Object>();
         for(Column col :cols){
@@ -136,9 +180,25 @@ public class App {
         return map;
     }
 
-    private static void deleteRowInES(Integer id)
-    {
+    private static void deleteRowInES(String index, String type, String id) throws IOException {
+        DeleteRequest request = new DeleteRequest(index,type,id);
+        client.delete(request);
+    }
 
+    private static void addRowToES(String index, String type, String id,Map<String,Object> goods) throws IOException {
+        IndexRequest request = new IndexRequest(
+                index,
+                type,
+                id).source(goods);
+        client.index(request);
+    }
+
+    private static void updateRowInES(String index, String type, String id,Map<String,Object> goods_updated) throws IOException {
+        UpdateRequest request = new UpdateRequest(
+                index,
+                type,
+                id).doc(goods_updated);
+        client.update(request);
     }
 
     private static void printColumn(List<Column> columns) {
@@ -147,7 +207,7 @@ public class App {
         }
     }
 
-    public static void  main1(String args[])
+    public static void  dumpGoodsToES()
     {
         try {
             List<Goods> goodsList = findGoods();
@@ -156,6 +216,13 @@ public class App {
         } catch (Exception e) {
             e.printStackTrace();
         }
+    }
+
+    public static void initES()
+    {
+         client = new RestHighLevelClient(
+                RestClient.builder(new HttpHost("localhost", 9200, "http")));
+
     }
 
     private static List<Goods> findGoods()throws Exception
@@ -200,8 +267,7 @@ public class App {
     private static int batchInsertToES(List<Goods> list) throws Exception
     {
         int batchSize = 100;
-        RestHighLevelClient client = new RestHighLevelClient(
-                    RestClient.builder(new HttpHost("localhost", 9200, "http")));
+
         try {
             BulkRequest request = new BulkRequest();
 
@@ -212,9 +278,8 @@ public class App {
                 property.put("category", goods.getCatName());
                 property.put("desc", goods.getDesc());
                 property.put("price", goods.getPrice());
-                property.put("id", goods.getId());
 
-                request.add(new IndexRequest("goods", "test", null)
+                request.add(new IndexRequest("goods", "test", goods.getId().toString())
                         .source(property));
             }
             request.timeout("2m");
