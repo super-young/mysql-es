@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<config>
+    <tables>
+        <table name="dsc_goods">
+            <columns>
+                <column  name="cat_id">
+                    <map type="related" table="dsc_category" join="cat_id" column="cat_name" as="cat_name"></map>
+                </column>
+                <column name="brand_id">
+                    <map type="related" table="dsc_brand" join="brand_id" column="brand_name" as="brand_name"></map>
+                </column>
+                <column name="goods_id">
+                    <map type="plain"></map>
+                </column>
+                <column name="shop_price">
+                    <map type="plain"></map>
+                </column>
+            </columns>
+        </table>
+    </tables>
+</config>

@@ -1,7 +1,5 @@
 package com.fbuy.app;
 
-import java.io.FileInputStream;
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.sql.*;
@@ -32,6 +30,12 @@ import org.elasticsearch.action.update.UpdateRequest;
 import org.elasticsearch.action.update.UpdateResponse;
 import org.elasticsearch.client.RestClient;
 import org.elasticsearch.client.RestHighLevelClient;
+import org.w3c.dom.*;
+import org.xml.sax.SAXException;
+
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.parsers.ParserConfigurationException;
 
 
 /**
@@ -47,10 +51,17 @@ public class App {
     static final String USER = "root";
     static final String PASS = "123456";
     static final String SchemaName = "fg_dev";
-    static Set<String> tables=null;
+    static Map<String,Map<String,ColumnMapConfig>> tablesMap=new HashMap<String,Map<String,ColumnMapConfig>>();
     private static RestHighLevelClient client=null;
     public static void main(String args[]) {
         init();
+
+        try {
+            find("dsc_goods",tablesMap.get("dsc_goods"));
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        System.exit(0);
         initES();
         if(args.length>1){
             dumpGoodsToES();
@@ -101,18 +112,94 @@ public class App {
     public static void init()
     {
         try {
-            FileInputStream reader = new FileInputStream("config.ini");
-            Properties pros = new Properties();
-            pros.load(reader);
-            String schema = pros.getProperty("database");
-            String tablesStr = pros.getProperty("tables");
-            String[] arr = tablesStr.split(",");
-            tables = new HashSet<String>(Arrays.asList(arr));
-        } catch (FileNotFoundException e) {
+            DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
+            DocumentBuilder db = dbf.newDocumentBuilder();
+            Document d = db.parse("config.xml");
+            NodeList tables = d.getElementsByTagName("table");
+            for(int i=0;i<tables.getLength();i++){
+                Node  table = tables.item(i);
+                String tableName = table.getAttributes().getNamedItem("name").getNodeValue();
+                NodeList columns = table.getChildNodes().item(1).getChildNodes();
+                tablesMap.put(tableName,parseTableColumns(columns));
+            }
+        } catch (ParserConfigurationException e) {
+            e.printStackTrace();
+        } catch (SAXException e) {
             e.printStackTrace();
         } catch (IOException e) {
             e.printStackTrace();
         }
+    }
+
+    public static class ColumnMapConfig
+    {
+        public String getType() {
+            return type;
+        }
+
+        public void setType(String type) {
+            this.type = type;
+        }
+
+        private String type;
+        private String table;
+        private String join;
+        private String column;
+        private String as;
+
+        public String getTable() {
+            return table;
+        }
+
+        public void setTable(String table) {
+            this.table = table;
+        }
+
+        public String getJoin() {
+            return join;
+        }
+
+        public void setJoin(String join) {
+            this.join = join;
+        }
+
+        public String getColumn() {
+            return column;
+        }
+
+        public void setColumn(String column) {
+            this.column = column;
+        }
+
+        public String getAs() {
+            return as;
+        }
+
+        public void setAs(String as) {
+            this.as = as;
+        }
+    }
+
+    protected static Map<String,ColumnMapConfig> parseTableColumns(NodeList columns)
+    {
+        Map<String,ColumnMapConfig> map =new HashMap<String, ColumnMapConfig>();
+        for(int i=0;i<columns.getLength();i++){
+            if(columns.item(i).getNodeType() != Node.TEXT_NODE){
+                NamedNodeMap attrs = columns.item(i).getAttributes();
+
+                NamedNodeMap configMap = columns.item(i).getChildNodes().item(1).getAttributes();
+                ColumnMapConfig cfg = new ColumnMapConfig();
+                cfg.setType(configMap.getNamedItem("type").getNodeValue());
+                if(cfg.getType().equals("related")) {
+                    cfg.setTable(configMap.getNamedItem("table").getNodeValue());
+                    cfg.setJoin(configMap.getNamedItem("join").getNodeValue());
+                    cfg.setColumn(configMap.getNamedItem("column").getNodeValue());
+                    cfg.setAs(configMap.getNamedItem("as").getNodeValue());
+                }
+                map.put(attrs.getNamedItem("name").getNodeValue(),cfg);
+            }
+        }
+        return map;
     }
 
     private static void printEntry(List<Entry> entrys) throws IOException {
@@ -122,11 +209,9 @@ public class App {
                 continue;
             }
 
-            if(!entry.getHeader().getSchemaName().equals(SchemaName) || !tables.contains(entry.getHeader().getTableName())){
-                continue;
-            }
-
-
+//            if(!entry.getHeader().getSchemaName().equals(SchemaName) || !tablesMap.contains(entry.getHeader().getTableName())){
+//                continue;
+//            }
 
             RowChange rowChage = null;
             try {
@@ -210,9 +295,8 @@ public class App {
     public static void  dumpGoodsToES()
     {
         try {
-            List<Goods> goodsList = findGoods();
-            Integer numOfCreated = batchInsertToES(goodsList);
-            System.out.println(numOfCreated);
+
+            System.out.println();
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -225,7 +309,7 @@ public class App {
 
     }
 
-    private static List<Goods> findGoods()throws Exception
+    private static List<Object> find(String table,Map<String,ColumnMapConfig> config)throws Exception
     {
         Connection conn = null;
         Statement stmt = null;
@@ -237,10 +321,28 @@ public class App {
 
         // 执行查询
         stmt = conn.createStatement();
-        String sql;
-        sql = "SELECT g.*,c.cat_name,b.brand_name FROM dsc_goods as g,dsc_category as c,dsc_brand as b WHERE g.cat_id=c.cat_id And g.brand_id=b.brand_id";
-        ResultSet rs = stmt.executeQuery(sql);
-        List<Goods> list = new ArrayList<Goods>();
+        StringBuffer select = new StringBuffer();
+        select.append("SELECT ");
+        StringBuffer where = new StringBuffer();
+        StringBuffer from =new StringBuffer();
+        from.append(table).append(",");
+        for(Map.Entry<String,ColumnMapConfig> entry:config.entrySet()){
+            if(entry.getValue().getType().equals("plain")){
+                select.append(table).append(".").append(entry.getKey()).append(",");
+            }else if(entry.getValue().getType().equals("related")){
+                select.append(table).append(".").append(entry.getKey()).append(",");
+                select.append(entry.getValue().getTable()).append(".").append(entry.getValue().getColumn()).append(",");
+                where .append(table).append(".").append(entry.getKey()).append("=").append(entry.getValue().getTable()).append(".").append(entry.getValue().getJoin()).append(" AND ");
+                from.append(entry.getValue().getTable()).append(",");
+            }
+        }
+        StringBuffer sql = new StringBuffer();
+        sql.append(select.substring(0,select.length()-1));
+        sql.append(" FROM ").append(from.substring(0,from.length()-1));
+        sql.append(" WHERE ").append(where.substring(0,where.length()-4));
+
+        ResultSet rs = stmt.executeQuery(sql.toString());
+        List<Object> list = new ArrayList<Object>();
         while (rs.next()){
             String name = rs.getString("goods_name");
             String desc = rs.getString("goods_desc");
@@ -249,12 +351,7 @@ public class App {
             Double price = rs.getDouble("shop_price");
             Integer id = rs.getInt("goods_id");
             Goods goods = new Goods();
-            goods.setBrandName(brandName);
-            goods.setCatName(catName);
-            goods.setName(name);
-            goods.setPrice(price);
-            goods.setDesc(desc);
-            goods.setId(id);
+
             list.add(goods);
         }
         // 完成后关闭
@@ -273,13 +370,9 @@ public class App {
 
             for (Goods goods : list) {
                 Map<String, Object> property = new HashMap<String, Object>();
-                property.put("name", goods.getName());
-                property.put("brand", goods.getBrandName());
-                property.put("category", goods.getCatName());
-                property.put("desc", goods.getDesc());
-                property.put("price", goods.getPrice());
 
-                request.add(new IndexRequest("goods", "test", goods.getId().toString())
+
+                request.add(new IndexRequest("goods", "test", null)
                         .source(property));
             }
             request.timeout("2m");
