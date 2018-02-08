@@ -52,12 +52,14 @@ public class App {
     static final String PASS = "123456";
     static final String SchemaName = "fg_dev";
     static Map<String,Map<String,ColumnMapConfig>> tablesMap=new HashMap<String,Map<String,ColumnMapConfig>>();
+    static Map<String,List<String>> syncMap = new HashMap<String, List<String>>();
     private static RestHighLevelClient client=null;
     public static void main(String args[]) {
         init();
 
         try {
-            find("dsc_goods",tablesMap.get("dsc_goods"));
+            List<Map<String,Object>> list =find("dsc_goods",tablesMap.get("dsc_goods"),"");
+            System.out.println();
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -131,55 +133,6 @@ public class App {
         }
     }
 
-    public static class ColumnMapConfig
-    {
-        public String getType() {
-            return type;
-        }
-
-        public void setType(String type) {
-            this.type = type;
-        }
-
-        private String type;
-        private String table;
-        private String join;
-        private String column;
-        private String as;
-
-        public String getTable() {
-            return table;
-        }
-
-        public void setTable(String table) {
-            this.table = table;
-        }
-
-        public String getJoin() {
-            return join;
-        }
-
-        public void setJoin(String join) {
-            this.join = join;
-        }
-
-        public String getColumn() {
-            return column;
-        }
-
-        public void setColumn(String column) {
-            this.column = column;
-        }
-
-        public String getAs() {
-            return as;
-        }
-
-        public void setAs(String as) {
-            this.as = as;
-        }
-    }
-
     protected static Map<String,ColumnMapConfig> parseTableColumns(NodeList columns)
     {
         Map<String,ColumnMapConfig> map =new HashMap<String, ColumnMapConfig>();
@@ -195,6 +148,13 @@ public class App {
                     cfg.setJoin(configMap.getNamedItem("join").getNodeValue());
                     cfg.setColumn(configMap.getNamedItem("column").getNodeValue());
                     cfg.setAs(configMap.getNamedItem("as").getNodeValue());
+                }else if (cfg.getType().equals("embed")){
+                    cfg.setTable(configMap.getNamedItem("table").getNodeValue());
+                    cfg.setJoin(configMap.getNamedItem("join").getNodeValue());
+                    cfg.setColumn(configMap.getNamedItem("column").getNodeValue());
+                    cfg.setAs(configMap.getNamedItem("as").getNodeValue());
+                    cfg.setKey(configMap.getNamedItem("key").getNodeValue());
+                    cfg.setLeftKey(configMap.getNamedItem("leftKey").getNodeValue());
                 }
                 map.put(attrs.getNamedItem("name").getNodeValue(),cfg);
             }
@@ -309,7 +269,7 @@ public class App {
 
     }
 
-    private static List<Object> find(String table,Map<String,ColumnMapConfig> config)throws Exception
+    private static List<Map<String,Object>> find(String table,Map<String,ColumnMapConfig> config,String condtion)throws Exception
     {
         Connection conn = null;
         Statement stmt = null;
@@ -324,16 +284,26 @@ public class App {
         StringBuffer select = new StringBuffer();
         select.append("SELECT ");
         StringBuffer where = new StringBuffer();
+        if(condtion.length()>0){
+            where.append(" ").append(condtion).append(" AND ");
+        }
         StringBuffer from =new StringBuffer();
         from.append(table).append(",");
         for(Map.Entry<String,ColumnMapConfig> entry:config.entrySet()){
-            if(entry.getValue().getType().equals("plain")){
-                select.append(table).append(".").append(entry.getKey()).append(",");
-            }else if(entry.getValue().getType().equals("related")){
-                select.append(table).append(".").append(entry.getKey()).append(",");
-                select.append(entry.getValue().getTable()).append(".").append(entry.getValue().getColumn()).append(",");
-                where .append(table).append(".").append(entry.getKey()).append("=").append(entry.getValue().getTable()).append(".").append(entry.getValue().getJoin()).append(" AND ");
-                from.append(entry.getValue().getTable()).append(",");
+            String key = entry.getKey();
+            ColumnMapConfig cfg = entry.getValue();
+            if(cfg.getType().equals("plain")){
+                select.append(table).append(".").append(key).append(",");
+            }else if(cfg.getType().equals("related")){
+                select.append(table).append(".").append(key).append(",");
+                select.append(cfg.getTable()).append(".").append(cfg.getColumn()).append(",");
+                where .append(table).append(".").append(key).append("=").append(cfg.getTable()).append(".").append(cfg.getJoin()).append(" AND ");
+                from.append(cfg.getTable()).append(",");
+            }else if(cfg.getType().equals("embed")){
+                select.append(cfg.getTable()).append(".").append(cfg.getColumn()).append(",");
+                from.append(cfg.getTable()).append(",");
+                where.append(cfg.getTable()).append(".").append(cfg.getJoin()).append("=").append(table).append(".").
+                        append(cfg.getLeftKey()).append(" AND ");
             }
         }
         StringBuffer sql = new StringBuffer();
@@ -342,17 +312,64 @@ public class App {
         sql.append(" WHERE ").append(where.substring(0,where.length()-4));
 
         ResultSet rs = stmt.executeQuery(sql.toString());
-        List<Object> list = new ArrayList<Object>();
+        List<Map<String,Object>> list = new ArrayList<Map<String,Object>>();
+        ResultSetMetaData meteData = rs.getMetaData();
+        Map<String,String> meteMap = new HashMap<String, String>();
+        for (int i=0;i<meteData.getColumnCount();i++){
+            meteMap.put(meteData.getColumnName(i),meteData.getColumnTypeName(i));
+        }
         while (rs.next()){
-            String name = rs.getString("goods_name");
-            String desc = rs.getString("goods_desc");
-            String catName = rs.getString("cat_name");
-            String brandName = rs.getString("brand_name");
-            Double price = rs.getDouble("shop_price");
-            Integer id = rs.getInt("goods_id");
-            Goods goods = new Goods();
-
-            list.add(goods);
+            Map<String,Object> map = new HashMap<String, Object>();
+            for(Map.Entry<String,ColumnMapConfig> entry:config.entrySet()) {
+                String key = entry.getKey();
+                ColumnMapConfig cfg = entry.getValue();
+                if(cfg.getType().equals("plain")) {
+                    if(meteMap.get(key).equals("String")){
+                        map.put(key,rs.getString(key));
+                    }
+                    if(meteMap.get(key).equals("Integer")){
+                        map.put(key,Integer.toString(rs.getInt(key)));
+                    }
+                    if(meteMap.get(key).equals("Double")){
+                        map.put(key,Double.toString(rs.getDouble(key)));
+                    }
+                }else if(cfg.getType().equals("relate")){
+                    if(meteMap.get(key).equals("String")){
+                        map.put(key,rs.getString(key));
+                    }
+                    if(meteMap.get(key).equals("Integer")){
+                        map.put(key,Integer.toString(rs.getInt(key)));
+                    }
+                    if(meteMap.get(key).equals("Double")){
+                        map.put(key,Double.toString(rs.getDouble(key)));
+                    }
+                    if(meteMap.get(cfg.getColumn()).equals("String")){
+                        map.put(cfg.getAs(),rs.getString(cfg.getColumn()));
+                    }
+                    if(meteMap.get(cfg.getColumn()).equals("Integer")){
+                        map.put(cfg.getAs(),Integer.toString(rs.getInt(cfg.getColumn())));
+                    }
+                    if(meteMap.get(cfg.getColumn()).equals("Double")){
+                        map.put(cfg.getAs(),Double.toString(rs.getDouble(cfg.getColumn())));
+                    }
+                }else if(cfg.getType().equals("embed")){
+                    Map<String,String> embedMap = new HashMap<String, String>();
+                    String[] columns = cfg.getColumn().split(",");
+                    for (String str:columns){
+                        if(meteMap.get(str).equals("String")){
+                            embedMap.put(str,rs.getString(str));
+                        }
+                        if(meteMap.get(str).equals("Integer")){
+                            embedMap.put(str,Integer.toString(rs.getInt(str)));
+                        }
+                        if(meteMap.get(cfg.getColumn()).equals("Double")){
+                            embedMap.put(str,Double.toString(rs.getDouble(str)));
+                        }
+                    }
+                    map.put(cfg.getAs(),embedMap);
+                }
+            }
+            list.add(map);
         }
         // 完成后关闭
         rs.close();
@@ -361,18 +378,17 @@ public class App {
         return list;
     }
 
-    private static int batchInsertToES(List<Goods> list) throws Exception
+    private static int batchInsertToES(String index,String type,String primaryKey,List<Map<String,Object>> docs) throws Exception
     {
         int batchSize = 100;
 
         try {
             BulkRequest request = new BulkRequest();
 
-            for (Goods goods : list) {
+            for (Map<String,Object> doc : docs) {
                 Map<String, Object> property = new HashMap<String, Object>();
 
-
-                request.add(new IndexRequest("goods", "test", null)
+                request.add(new IndexRequest(index, type, (String) doc.get(primaryKey))
                         .source(property));
             }
             request.timeout("2m");

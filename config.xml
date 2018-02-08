@@ -15,6 +15,124 @@
                 <column name="shop_price">
                     <map type="plain"></map>
                 </column>
+                <column name="goods_sn">
+                    <map type="plain"></map>
+                </column>
+                <column name="goods_name">
+                    <map type="plain"></map>
+                </column>
+                <column name="goods_name_style">
+                    <map type="plain"></map>
+                </column>
+                <column name="click_count">
+                    <map type="plain"></map>
+                </column>
+                <column name="goods_number">
+                    <map type="plain"></map>
+                </column>
+                <column name="goods_weight">
+                    <map type="plain" ></map>
+                </column>
+                <column name="default_shipping">
+                    <map type="plain"  ></map>
+                </column>
+                <column name="market_price">
+                    <map type="plain" ></map>
+                </column>
+                <column name="promote_price">
+                    <map type="plain" ></map>
+                </column>
+                <column name="promote_start_date">
+                    <map type="plain" ></map>
+                </column>
+                <column name="promote_end_date">
+                    <map type="plain" ></map>
+                </column>
+                <column name="warn_number">
+                    <map type="plain" ></map>
+                </column>
+                <column name="keywords">
+                    <map type="plain"  ></map>
+                </column>
+                <column name="goods_brief">
+                    <map type="plain" ></map>
+                </column>
+                <column name="goods_desc">
+                    <map type="plain" ></map>
+                </column>
+                <column name="goods_thumb">
+                    <map type="plain" ></map>
+                </column>
+                <column name="goods_img">
+                    <map type="plain" ></map>
+                </column>
+                <column name="original_img">
+                    <map type="plain" ></map>
+                </column>
+                <column name="is_real">
+                    <map type="plain" ></map>
+                </column>
+                <column name="extension_code">
+                    <map type="plain" ></map>
+                </column>
+                <column name="is_on_sale">
+                    <map type="plain" ></map>
+                </column>
+                <column name="is_shipping">
+                    <map type="plain" ></map>
+                </column>
+                <column name="integral">
+                    <map type="plain" ></map>
+                </column>
+                <column name="add_time">
+                    <map type="plain" ></map>
+                </column>
+                <column name="sort_order">
+                    <map type="plain" ></map>
+                </column>
+                <column name="is_delete">
+                    <map type="plain" ></map>
+                </column>
+                <column name="is_best">
+                    <map type="plain" ></map>
+                </column>
+                <column name="is_new">
+                    <map type="plain" ></map>
+                </column>
+                <column name="is_hot">
+                    <map type="plain" ></map>
+                </column>
+                <column name="is_promote">
+                    <map type="plain" ></map>
+                </column>
+                <column name="is_volume">
+                    <map type="plain" ></map>
+                </column>
+                <column name="is_fullcut">
+                    <map type="plain" ></map>
+                </column>
+                <column name="bonus_type_id">
+                    <map type="plain" ></map>
+                </column>
+                <column name="last_update">
+                    <map type="plain" ></map>
+                </column>
+                <column name="goods_type">
+                    <map type="plain" ></map>
+                </column>
+                <column name="rank_integral">
+                    <map type="plain" ></map>
+                </column>
+                <column name="suppliers_id">
+                    <map type="plain" ></map>
+                </column>
+                <column name="suppliers_price">
+                    <map type="plain" ></map>
+                </column>
+                <column name="attrs">
+                    <map leftKey="goods_id" type="embed" table="dsc_goods_attr" join="goods_id" column="goods_attr_id,attr_id,attr_value,color_value" as="attrs" key="goods_attr_id">
+                    </map>
+                </column>
             </columns>
         </table>
     </tables>
