@@ -315,7 +315,7 @@ public class App {
         List<Map<String,Object>> list = new ArrayList<Map<String,Object>>();
         ResultSetMetaData meteData = rs.getMetaData();
         Map<String,String> meteMap = new HashMap<String, String>();
-        for (int i=0;i<meteData.getColumnCount();i++){
+        for (int i=1;i<=meteData.getColumnCount();i++){
             meteMap.put(meteData.getColumnName(i),meteData.getColumnTypeName(i));
         }
         while (rs.next()){
@@ -324,45 +324,45 @@ public class App {
                 String key = entry.getKey();
                 ColumnMapConfig cfg = entry.getValue();
                 if(cfg.getType().equals("plain")) {
-                    if(meteMap.get(key).equals("String")){
+                    if(meteMap.get(key).matches("VARCHAR|TEXT")){
                         map.put(key,rs.getString(key));
                     }
-                    if(meteMap.get(key).equals("Integer")){
+                    if(meteMap.get(key).matches("INT|BIT")){
                         map.put(key,Integer.toString(rs.getInt(key)));
                     }
-                    if(meteMap.get(key).equals("Double")){
+                    if(meteMap.get(key).matches("DOUBLE|DECIMAL")){
                         map.put(key,Double.toString(rs.getDouble(key)));
                     }
                 }else if(cfg.getType().equals("relate")){
-                    if(meteMap.get(key).equals("String")){
+                    if(meteMap.get(key).matches("VARCHAR|TEXT")){
                         map.put(key,rs.getString(key));
                     }
-                    if(meteMap.get(key).equals("Integer")){
+                    if(meteMap.get(key).matches("INT|BIT")){
                         map.put(key,Integer.toString(rs.getInt(key)));
                     }
-                    if(meteMap.get(key).equals("Double")){
+                    if(meteMap.get(key).matches("DOUBLE|DECIMAL")){
                         map.put(key,Double.toString(rs.getDouble(key)));
                     }
-                    if(meteMap.get(cfg.getColumn()).equals("String")){
+                    if(meteMap.get(cfg.getColumn()).matches("VARCHAR|TEXT")){
                         map.put(cfg.getAs(),rs.getString(cfg.getColumn()));
                     }
-                    if(meteMap.get(cfg.getColumn()).equals("Integer")){
+                    if(meteMap.get(cfg.getColumn()).matches("INT|BIT")){
                         map.put(cfg.getAs(),Integer.toString(rs.getInt(cfg.getColumn())));
                     }
-                    if(meteMap.get(cfg.getColumn()).equals("Double")){
+                    if(meteMap.get(cfg.getColumn()).matches("DOUBLE|DECIMAL")){
                         map.put(cfg.getAs(),Double.toString(rs.getDouble(cfg.getColumn())));
                     }
                 }else if(cfg.getType().equals("embed")){
                     Map<String,String> embedMap = new HashMap<String, String>();
                     String[] columns = cfg.getColumn().split(",");
                     for (String str:columns){
-                        if(meteMap.get(str).equals("String")){
+                        if(meteMap.get(str).matches("VARCHAR|TEXT")){
                             embedMap.put(str,rs.getString(str));
                         }
-                        if(meteMap.get(str).equals("Integer")){
+                        if(meteMap.get(str).matches("INT|BIT")){
                             embedMap.put(str,Integer.toString(rs.getInt(str)));
                         }
-                        if(meteMap.get(cfg.getColumn()).equals("Double")){
+                        if(meteMap.get(str).matches("DOUBLE|DECIMAL")){
                             embedMap.put(str,Double.toString(rs.getDouble(str)));
                         }
                     }
